@@ -58,6 +58,7 @@
       - PG_PASSWORD=fintech
       - REPORTS_DIR=/opt/airflow/reports
       - WAREHOUSE_DIR=/opt/airflow/warehouse
+      # - AIRFLOW__WEBSERVER__SECRET_KEY=gEvjkNaUFMB2+24Y0FvdaA==
     ports:
       - "8080:8080"
     volumes:
@@ -85,6 +86,7 @@
       - PG_PASSWORD=fintech
       - REPORTS_DIR=/opt/airflow/reports
       - WAREHOUSE_DIR=/opt/airflow/warehouse
+      # - AIRFLOW__WEBSERVER__SECRET_KEY=gEvjkNaUFMB2+24Y0FvdaA==
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./reports:/opt/airflow/reports

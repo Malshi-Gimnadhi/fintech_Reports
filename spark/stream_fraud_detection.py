@@ -13,8 +13,11 @@ from pyspark.sql.types import StructType, StructField, StringType, DoubleType
 
 
 TOPIC = (os.environ.get("KAFKA_TOPIC") or "transactions").strip()
-KAFKA_BOOTSTRAP = (os.environ.get("KAFKA_BOOTSTRAP") or "kafka:29092").strip()
 
+# FIX: match docker-compose.core.yml container_name fintech-kafka
+KAFKA_BOOTSTRAP = (os.environ.get("KAFKA_BOOTSTRAP") or "fintech-kafka:29092").strip()
+
+# OK already: docker-compose.core.yml container_name fintech-postgres
 PG_URL = (os.environ.get("PG_URL") or "jdbc:postgresql://fintech-postgres:5432/fintech_db").strip()
 PG_USER = (os.environ.get("PG_USER") or "fintech").strip()
 PG_PASSWORD = (os.environ.get("PG_PASSWORD") or "fintech").strip()
@@ -101,6 +104,10 @@ def main():
         .dropDuplicates(["transaction_id"])
     )
 
+# #     # FIX: create validated stream = non-fraud
+# #     fraud_ids = fraud_events.select("transaction_id").dropDuplicates(["transaction_id"])
+# #     validated_events = enriched.join(fraud_ids, on="transaction_id", how="left_anti")
+
     jdbc_props = {
         "user": PG_USER,
         "password": PG_PASSWORD,
@@ -123,6 +130,14 @@ def main():
             .jdbc(url=PG_URL, table="fraud_alerts", mode="append", properties=jdbc_props)
         )
 
+    def write_validated(batch_df, batch_id: int):
+        (
+            batch_df
+            .select("transaction_id", "user_id", "event_time", "merchant_category", "amount", "country", "city")
+            .write
+            .jdbc(url=PG_URL, table="validated_transactions", mode="append", properties=jdbc_props)
+        )
+
     q_raw = (
         enriched.writeStream
         .foreachBatch(write_raw)
@@ -138,6 +153,14 @@ def main():
         .option("checkpointLocation", f"{CHECKPOINT_ROOT}/fraud")
         .start()
     )
+
+    # q_validated = (
+    #     validated_events.writeStream
+    #     .foreachBatch(write_validated)
+    #     .outputMode("append")
+    #     .option("checkpointLocation", f"{CHECKPOINT_ROOT}/validated")
+    #     .start()
+    # )
 
     spark.streams.awaitAnyTermination()
 

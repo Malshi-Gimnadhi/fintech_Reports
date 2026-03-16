@@ -16,6 +16,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    networks:
+      - fintech-net
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
@@ -25,6 +27,8 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+    networks:
+      - fintech-net
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
@@ -43,6 +47,8 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    networks:
+      - fintech-net
 
 volumes:
   postgres_data:

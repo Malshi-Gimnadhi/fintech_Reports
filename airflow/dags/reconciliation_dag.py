@@ -7,7 +7,7 @@ import pandas as pd
 import psycopg2
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.operators.python_operator import PythonOperator
 
 
 # These will work if Airflow runs in docker-compose on same network as Postgres service "postgres"

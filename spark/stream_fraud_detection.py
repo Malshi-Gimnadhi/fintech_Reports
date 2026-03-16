@@ -1,27 +1,30 @@
 import os
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, from_json, to_timestamp, expr, window, countDistinct, lit, when, concat
+    col,
+    from_json,
+    to_timestamp,
+    expr,
+    lit,
+    concat,
 )
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType
 
 
-TOPIC = os.environ.get("KAFKA_TOPIC", "transactions")
-KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka:29092")  # docker-internal
-PG_URL = os.environ.get("PG_URL", "jdbc:postgresql://postgres:5432/fintech_db")
-PG_USER = os.environ.get("PG_USER", "fintech")
-PG_PASSWORD = os.environ.get("PG_PASSWORD", "fintech")
+TOPIC = (os.environ.get("KAFKA_TOPIC") or "transactions").strip()
+KAFKA_BOOTSTRAP = (os.environ.get("KAFKA_BOOTSTRAP") or "kafka:29092").strip()
 
-HIGH_AMOUNT_THRESHOLD = float(os.environ.get("HIGH_AMOUNT_THRESHOLD", "5000"))
+PG_URL = (os.environ.get("PG_URL") or "jdbc:postgresql://fintech-postgres:5432/fintech_db").strip()
+PG_USER = (os.environ.get("PG_USER") or "fintech").strip()
+PG_PASSWORD = (os.environ.get("PG_PASSWORD") or "fintech").strip()
+
+HIGH_AMOUNT_THRESHOLD = float(os.environ.get("HIGH_AMOUNT_THRESHOLD") or "5000")
+CHECKPOINT_ROOT = (os.environ.get("CHECKPOINT_ROOT") or "/tmp/spark-checkpoints").strip()
 
 
-def build_spark():
-    return (
-        SparkSession.builder
-        .appName("fintech-fraud-stream")
-        # If running on spark container, master is usually set externally
-        .getOrCreate()
-    )
+def build_spark() -> SparkSession:
+    return SparkSession.builder.appName("fintech-fraud-stream").getOrCreate()
 
 
 def main():
@@ -31,14 +34,13 @@ def main():
     schema = StructType([
         StructField("transaction_id", StringType(), False),
         StructField("user_id", StringType(), False),
-        StructField("timestamp", StringType(), False),  # ISO string
+        StructField("timestamp", StringType(), False),
         StructField("merchant_category", StringType(), False),
         StructField("amount", DoubleType(), False),
         StructField("country", StringType(), False),
         StructField("city", StringType(), False),
     ])
 
-    # 1) Read Kafka
     kafka_df = (
         spark.readStream
         .format("kafka")
@@ -48,7 +50,6 @@ def main():
         .load()
     )
 
-    # 2) Parse JSON
     parsed = (
         kafka_df
         .selectExpr("CAST(value AS STRING) AS value_str")
@@ -56,9 +57,6 @@ def main():
         .select("j.*")
     )
 
-    # 3) Convert timestamp -> event_time (event time)
-    # Your producer outputs timestamps like: 2026-03-15T10:20:30.123Z
-    # Spark can parse with pattern: yyyy-MM-dd'T'HH:mm:ss.SSSX
     enriched = (
         parsed
         .withColumn("event_time", to_timestamp(col("timestamp"), "yyyy-MM-dd'T'HH:mm:ss.SSSX"))
@@ -66,55 +64,43 @@ def main():
         .withWatermark("event_time", "10 minutes")
     )
 
-    # ---- FRAUD RULES ----
-
     # Rule A: HIGH_AMOUNT
-    high_amount = enriched.where(col("amount") > lit(HIGH_AMOUNT_THRESHOLD)) \
-        .withColumn("fraud_type", lit("HIGH_AMOUNT")) \
+    high_amount = (
+        enriched.where(col("amount") > lit(HIGH_AMOUNT_THRESHOLD))
+        .withColumn("fraud_type", lit("HIGH_AMOUNT"))
         .withColumn("reason", concat(lit("Amount > "), lit(str(HIGH_AMOUNT_THRESHOLD))))
+    )
 
     # Rule B: IMPOSSIBLE_TRAVEL
-    # Approach: in a 10-minute tumbling window per user, if countDistinct(country) >= 2, flag those events.
-    windowed_country_counts = (
-        enriched
-        .groupBy(window(col("event_time"), "10 minutes"), col("user_id"))
-        .agg(countDistinct(col("country")).alias("country_cnt"))
-        .where(col("country_cnt") >= 2)
-        .select(
-            col("window.start").alias("w_start"),
-            col("window.end").alias("w_end"),
-            col("user_id")
+    a = enriched.alias("a")
+    b = enriched.alias("b")
+
+    impossible_travel_pairs = (
+        a.join(
+            b,
+            (col("a.user_id") == col("b.user_id"))
+            & (col("a.transaction_id") != col("b.transaction_id"))
+            & (col("a.country") != col("b.country"))
+            & (col("b.event_time") >= col("a.event_time"))
+            & (col("b.event_time") <= expr("a.event_time + interval 10 minutes")),
+            "inner",
         )
     )
 
-    # Join back: mark events that fall into suspicious windows
-    suspicious_events = (
-        enriched.alias("e")
-        .join(
-            windowed_country_counts.alias("w"),
-            (col("e.user_id") == col("w.user_id")) &
-            (col("e.event_time") >= col("w.w_start")) &
-            (col("e.event_time") < col("w.w_end")),
-            "inner"
-        )
-        .drop("w_start", "w_end")
-        .withColumn("fraud_type", lit("IMPOSSIBLE_TRAVEL"))
-        .withColumn("reason", lit("Same user in >=2 countries within 10 minutes"))
-    )
-
-    # Union fraud events (dedupe by transaction_id)
-    fraud_events = high_amount.select(enriched.columns + ["fraud_type", "reason"]) \
-        .unionByName(suspicious_events.select(enriched.columns + ["fraud_type", "reason"])) \
+    impossible_travel_events = (
+        impossible_travel_pairs.selectExpr("a.*")
+        .unionByName(impossible_travel_pairs.selectExpr("b.*"))
         .dropDuplicates(["transaction_id"])
-
-    # Validated = all events that are NOT fraud (anti-join by transaction_id)
-    validated = enriched.alias("all").join(
-        fraud_events.select("transaction_id").alias("f"),
-        on="transaction_id",
-        how="left_anti"
+        .withColumn("fraud_type", lit("IMPOSSIBLE_TRAVEL"))
+        .withColumn("reason", lit("Same user in 2 countries within 10 minutes"))
     )
 
-    # ---- JDBC write helpers ----
+    fraud_events = (
+        high_amount.select(enriched.columns + ["fraud_type", "reason"])
+        .unionByName(impossible_travel_events.select(enriched.columns + ["fraud_type", "reason"]))
+        .dropDuplicates(["transaction_id"])
+    )
+
     jdbc_props = {
         "user": PG_USER,
         "password": PG_PASSWORD,
@@ -122,38 +108,26 @@ def main():
     }
 
     def write_raw(batch_df, batch_id: int):
-        (batch_df
-         .select("transaction_id", "user_id", "event_time", "merchant_category", "amount", "country", "city")
-         .write
-         .jdbc(url=PG_URL, table="raw_transactions", mode="append", properties=jdbc_props))
-
-    def write_validated(batch_df, batch_id: int):
-        (batch_df
-         .select("transaction_id", "user_id", "event_time", "merchant_category", "amount", "country", "city")
-         .write
-         .jdbc(url=PG_URL, table="validated_transactions", mode="append", properties=jdbc_props))
+        (
+            batch_df
+            .select("transaction_id", "user_id", "event_time", "merchant_category", "amount", "country", "city")
+            .write
+            .jdbc(url=PG_URL, table="raw_transactions", mode="append", properties=jdbc_props)
+        )
 
     def write_fraud(batch_df, batch_id: int):
-        (batch_df
-         .select("transaction_id", "user_id", "event_time", "fraud_type", "reason", "amount", "country", "city")
-         .write
-         .jdbc(url=PG_URL, table="fraud_alerts", mode="append", properties=jdbc_props))
+        (
+            batch_df
+            .select("transaction_id", "user_id", "event_time", "fraud_type", "reason", "amount", "country", "city")
+            .write
+            .jdbc(url=PG_URL, table="fraud_alerts", mode="append", properties=jdbc_props)
+        )
 
-    # ---- START STREAMS ----
-    # NOTE: each foreachBatch is its own query
     q_raw = (
         enriched.writeStream
         .foreachBatch(write_raw)
         .outputMode("append")
-        .option("checkpointLocation", "/tmp/checkpoints/raw")
-        .start()
-    )
-
-    q_validated = (
-        validated.writeStream
-        .foreachBatch(write_validated)
-        .outputMode("append")
-        .option("checkpointLocation", "/tmp/checkpoints/validated")
+        .option("checkpointLocation", f"{CHECKPOINT_ROOT}/raw")
         .start()
     )
 
@@ -161,7 +135,7 @@ def main():
         fraud_events.writeStream
         .foreachBatch(write_fraud)
         .outputMode("append")
-        .option("checkpointLocation", "/tmp/checkpoints/fraud")
+        .option("checkpointLocation", f"{CHECKPOINT_ROOT}/fraud")
         .start()
     )
 

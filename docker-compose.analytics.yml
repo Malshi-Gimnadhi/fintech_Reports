@@ -1,0 +1,124 @@
+﻿services:
+  spark-master:
+    image: apache/spark:3.5.1
+    container_name: fintech-spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+    ports:
+      - "8081:8080"
+      - "7077:7077"
+    volumes:
+      - ./spark:/opt/spark-apps
+      - spark_checkpoints:/tmp/checkpoints
+    networks:
+      - fintech-net
+
+  spark-worker:
+    image: apache/spark:3.5.1
+    container_name: fintech-spark-worker
+    depends_on:
+      - spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+    volumes:
+      - ./spark:/opt/spark-apps
+      - spark_checkpoints:/tmp/checkpoints
+    networks:
+      - fintech-net
+
+  airflow-db:
+    image: postgres:16
+    container_name: fintech-airflow-db
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    networks:
+      - fintech-net
+
+  airflow-init:
+    image: apache/airflow:2.9.3
+    container_name: fintech-airflow-init
+    depends_on:
+      - airflow-db
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow_db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - PIP_ADDITIONAL_REQUIREMENTS=pandas==2.2.3 psycopg2-binary==2.9.9
+      - PG_HOST=fintech-postgres
+      - PG_PORT=5432
+      - PG_DB=fintech_db
+      - PG_USER=fintech
+      - PG_PASSWORD=fintech
+      - REPORTS_DIR=/opt/airflow/reports
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./reports:/opt/airflow/reports
+    entrypoint: /bin/bash
+    command: -c "airflow db init"
+    networks:
+      - fintech-net
+
+  airflow-webserver:
+    image: apache/airflow:2.9.3
+    container_name: fintech-airflow-webserver
+    depends_on:
+      - airflow-init
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow_db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+      - PIP_ADDITIONAL_REQUIREMENTS=pandas==2.2.3 psycopg2-binary==2.9.9
+      - PG_HOST=fintech-postgres
+      - PG_PORT=5432
+      - PG_DB=fintech_db
+      - PG_USER=fintech
+      - PG_PASSWORD=fintech
+      - REPORTS_DIR=/opt/airflow/reports
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./reports:/opt/airflow/reports
+    command: webserver
+    networks:
+      - fintech-net
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.3
+    container_name: fintech-airflow-scheduler
+    depends_on:
+      - airflow-init
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow_db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - PIP_ADDITIONAL_REQUIREMENTS=pandas==2.2.3 psycopg2-binary==2.9.9
+      - PG_HOST=fintech-postgres
+      - PG_PORT=5432
+      - PG_DB=fintech_db
+      - PG_USER=fintech
+      - PG_PASSWORD=fintech
+      - REPORTS_DIR=/opt/airflow/reports
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./reports:/opt/airflow/reports
+    command: scheduler
+    networks:
+      - fintech-net
+
+volumes:
+  spark_checkpoints:
+  airflow_db_data:
+
+networks:
+  fintech-net:
+    external: true

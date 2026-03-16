@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.*
+.idea/
+.vscode/
+*.log
+
+# Airflow
+airflow/logs/
+airflow/airflow.db
+airflow/webserver_config.py
+
+# Spark checkpoints (optional: usually should NOT be committed)
+spark_checkpoints/
+tmp/
+checkpoints/
+
+# Reports output (optional: usually you do NOT commit generated reports)
+reports/*.csv
+
+# OS
+.DS_Store
+Thumbs.db

@@ -31,6 +31,7 @@
       - PG_PASSWORD=fintech
       - REPORTS_DIR=/opt/airflow/reports
       - WAREHOUSE_DIR=/opt/airflow/warehouse
+      - AIRFLOW__WEBSERVER__SECRET_KEY=fintech-airflow-secret-key-2026
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./reports:/opt/airflow/reports
@@ -58,7 +59,7 @@
       - PG_PASSWORD=fintech
       - REPORTS_DIR=/opt/airflow/reports
       - WAREHOUSE_DIR=/opt/airflow/warehouse
-      # - AIRFLOW__WEBSERVER__SECRET_KEY=gEvjkNaUFMB2+24Y0FvdaA==
+      - AIRFLOW__WEBSERVER__SECRET_KEY=fintech-airflow-secret-key-2026
     ports:
       - "8080:8080"
     volumes:
@@ -86,7 +87,7 @@
       - PG_PASSWORD=fintech
       - REPORTS_DIR=/opt/airflow/reports
       - WAREHOUSE_DIR=/opt/airflow/warehouse
-      # - AIRFLOW__WEBSERVER__SECRET_KEY=gEvjkNaUFMB2+24Y0FvdaA==
+      - AIRFLOW__WEBSERVER__SECRET_KEY=fintech-airflow-secret-key-2026
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./reports:/opt/airflow/reports
@@ -104,6 +105,7 @@
       - "8081:8080"
     volumes:
       - ./spark:/opt/spark-apps
+      - ./spark-cache:/opt/spark-cache
     networks:
       - fintech-net
 
@@ -115,6 +117,7 @@
       - spark-master
     volumes:
       - ./spark:/opt/spark-apps
+       - ./spark-cache:/opt/spark-cache
     networks:
       - fintech-net
 

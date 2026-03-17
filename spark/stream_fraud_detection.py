@@ -125,7 +125,17 @@ def main():
     def write_fraud(batch_df, batch_id: int):
         (
             batch_df
-            .select("transaction_id", "user_id", "event_time", "fraud_type", "reason", "amount", "country", "city")
+            .select(
+                "transaction_id",
+                "user_id",
+                "event_time",
+                "merchant_category",
+                "fraud_type",
+                "reason",
+                "amount",
+                "country",
+                "city",
+            )
             .write
             .jdbc(url=PG_URL, table="fraud_alerts", mode="append", properties=jdbc_props)
         )

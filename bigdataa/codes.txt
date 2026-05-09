@@ -1,0 +1,24 @@
+mkdir -p /tmp/ivy
+mkdir -p /tmp/spark-jars
+
+/opt/spark/bin/spark-submit \
+  --master spark://spark-master:7077 \
+  --conf spark.jars.ivy=/tmp/ivy \
+  --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.3 \
+  /opt/spark-apps/stream_fraud_detection.py
+  
+  
+  
+  docker exec -it fintech-spark-master bash -lc "mkdir -p /tmp/ivy && /opt/spark/bin/spark-submit --master spark://spark-master:7077 --conf spark.jars.ivy=/tmp/ivy --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.3 /opt/spark-apps/stream_fraud_detection.py"
+  
+ ########################################### 
+	A4) Start producer again (so new events arrive)
+Run your producer (whatever command your project uses) so it emits new transactions.
+
+	A5) Re-run Spark streaming job
+docker exec -it fintech-spark-master bash -lc "mkdir -p /tmp/ivy && /opt/spark/bin/spark-submit --master spark://spark-master:7077 --conf spark.jars.ivy=/tmp/ivy --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.3 /opt/spark-apps/stream_fraud_detection.py"
+
+Then verify counts:
+
+docker exec -it fintech-postgres psql -U fintech -d fintech_db -c "select count(*) from raw_transactions;"
+docker exec -it fintech-postgres psql -U fintech -d fintech_db -c "select count(*) from fraud_alerts;"

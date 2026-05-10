@@ -1,0 +1,2 @@
+window_start,window_end,total_ingress_amount,validated_amount,fraud_amount,difference_ingress_minus_validated
+2026-03-17 13:11:46.452445+00:00,2026-03-17 19:11:46.452445+00:00,493049.6,211970.81,313569.08,281078.79
